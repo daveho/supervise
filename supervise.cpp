@@ -63,6 +63,14 @@ void sigterm_handler( int ) {
   kill( g_mainproc, SIGKILL );
 }
 
+void usage( void ) {
+  fprintf( stderr,
+           "Usage: ./supervise [options] <program> [<args...>]\n"
+           "Options:\n"
+           "  --fd=N     supervised process writes child process info to fd N" );
+  exit( 1 );
+}
+
 int main(int argc, char **argv) {
   // Pids of all processes that we know are running.
   std::set<pid_t> g_procs;
@@ -71,8 +79,22 @@ int main(int argc, char **argv) {
   // process (about pids of child processes it creates)
   int g_pipe_fds[2];
 
+  // The file descriptor the supervised process will use to
+  // send information about child processes
+  int notification_fd = 3;
+
+  // Handle options (just one for now)
+  if ( argc > 1 && strncmp( argv[1], "--fd=", 5 ) == 0 ) {
+    const char *n = argv[1] + 5;
+    if ( sscanf( n, "%d", &notification_fd ) != 1 )
+      usage();
+
+    argv[1] = argv[0];
+    argv++;
+  }
+
   if ( argc < 2 )
-    fatal( "Usage: ./supervise <program> [<args...>]", 1 );
+    usage();
 
   // Install handler for SIGTERM (which is what timeout will send
   // if this process times out)
@@ -82,22 +104,22 @@ int main(int argc, char **argv) {
   // we're running in a terminal and the user uses control-C)
   install_handler( SIGINT, sigterm_handler );
 
-  // Use dup2 to make fd 3 a duplicate of stdin.
+  // Use dup2 to make notification fd a duplicate of stdin.
   // This prevents the pipe() system call from allocating
-  // fd 3 as the read end of the pipe.
-  if ( dup2( 0, 3 ) < 0 )
-    fatal( "dup2() failed (while reserving fd 3)" );
+  // notification fd as the read end of the pipe.
+  if ( dup2( 0, notification_fd ) < 0 )
+    fatal( "dup2() failed (while reserving notification fd)" );
 
   // Create pipe for main process to use to let us know about
   // child processes it creates.
   if ( pipe( g_pipe_fds ) < 0)
     fatal( "pipe() failed" );
 
-  // Use dup2 to make the write end of the pipe fd 3.
-  // This will close the current fd 3, which is a duplicate
+  // Use dup2 to make the write end of the pipe notification fd.
+  // This will close the current notification fd, which is a duplicate
   // of stdin.
-  if ( dup2( g_pipe_fds[1], 3 ) < 0 )
-    fatal( "dup2() failed (creating fd 3 as write end of pipe)" );
+  if ( dup2( g_pipe_fds[1], notification_fd ) < 0 )
+    fatal( "dup2() failed (creating notification fd as write end of pipe)" );
 
   // At this point we should be ready to creete tha main process.
   g_mainproc = fork();
@@ -112,7 +134,7 @@ int main(int argc, char **argv) {
       std::stringstream ss;
       ss << "error " << errno << "\n";
       std::string msg = ss.str();
-      if ( write( 3, msg.data(), msg.size() ) != ssize_t( msg.size() ) )
+      if ( write( notification_fd, msg.data(), msg.size() ) != ssize_t( msg.size() ) )
         // This really shouldn't happen
         fatal( "in child, execve() failed, and write() to pipe failed" );
       _exit( UNEXPECTED_ERROR );
@@ -121,7 +143,7 @@ int main(int argc, char **argv) {
 
   // The parent can close the write end of the pipe
   close( g_pipe_fds[1] );
-  close( 3 );
+  close( notification_fd );
 
   // Read from the pipe
   FILE *pipe_in = fdopen( g_pipe_fds[0], "r" );
