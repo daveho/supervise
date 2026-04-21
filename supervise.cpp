@@ -89,8 +89,11 @@ int main(int argc, char **argv) {
     if ( sscanf( n, "%d", &notification_fd ) != 1 )
       usage();
 
+    // Fix up argv/argc because there is now one less command line argument
+    // to pass on to the supervised command
     argv[1] = argv[0];
     argv++;
+    argc--;
   }
 
   if ( argc < 2 )
