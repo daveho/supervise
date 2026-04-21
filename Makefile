@@ -5,4 +5,4 @@ supervise : supervise.cpp
 	$(CXX) $(CXXFLAGS) supervise.cpp -o $@
 
 clean :
-	rm -f supervisor
+	rm -f supervise
